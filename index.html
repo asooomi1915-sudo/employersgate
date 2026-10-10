@@ -323,7 +323,7 @@
                                         <div class="flex gap-2 w-full sm:w-auto">
                                             <select id="newGameSelect" class="flex-1 sm:w-40 border border-slate-300 rounded-lg px-2 py-1 text-[10px] font-bold outline-none cursor-pointer">
                                                 <option value="">-- اختر المحتوى لإدراجه --</option>
-                                                <!-- تُولد برمجياً -->
+                                                <!-- تُولد برمجياً من السحابة -->
                                             </select>
                                             <button type="button" onclick="Portal.addGameToUnit()" class="bg-indigo-100 hover:bg-indigo-200 text-indigo-700 px-3 py-1 rounded-lg text-[10px] font-black transition whitespace-nowrap"><i class="fa-solid fa-plus"></i> إدراج</button>
                                         </div>
@@ -478,23 +478,8 @@
         let unsubscribeTasks = null;
         let unsubscribeNotifs = null;
 
-        // مكتبة الألعاب المتاحة في المنصة للإدراج (تتضمن الفيديو والمكالمات)
-        const availableGamesDB = {
-            'reaction': { title: 'صائد النجوم', icon: 'fa-meteor', color: 'amber' },
-            'memory': { title: 'شفرة الخزنة', icon: 'fa-lock', color: 'purple' },
-            'flex': { title: 'البوابات العكسية', icon: 'fa-shuffle', color: 'emerald' },
-            'stroop': { title: 'تحدي الألوان', icon: 'fa-palette', color: 'rose' },
-            'matrix': { title: 'مصفوفة التركيز', icon: 'fa-border-all', color: 'cyan' },
-            'math': { title: 'الميزان الذكي', icon: 'fa-calculator', color: 'indigo' },
-            'visual': { title: 'العين الثاقبة', icon: 'fa-eye', color: 'amber' },
-            'schulte': { title: 'شبكة الأرقام', icon: 'fa-table-cells-large', color: 'teal' },
-            'pattern': { title: 'النمط الذكي', icon: 'fa-puzzle-piece', color: 'pink' },
-            'emotion': { title: 'قارئ المشاعر', icon: 'fa-face-smile-beam', color: 'fuchsia' },
-            'word': { title: 'الكلمة المفقودة', icon: 'fa-comment-dots', color: 'lime' },
-            'association': { title: 'رابط العجائب', icon: 'fa-link', color: 'violet' },
-            'video_quiz': { title: 'فيديو المحاكاة التفاعلي (أسئلة)', icon: 'fa-file-video', color: 'blue' },
-            'audio_call': { title: 'مكالمة الذاكرة الصوتية', icon: 'fa-phone-volume', color: 'emerald' }
-        };
+        // قاعدة بيانات الألعاب المتاحة - تُجلب ديناميكياً من مجموعة games_library السحابية
+        let availableGamesDB = {};
 
         window.Portal = {
             cmsUnits: [],
@@ -640,9 +625,6 @@
                 document.getElementById('kpiActive').textContent = active;
                 document.getElementById('kpiPoints').innerHTML = `${completed * 10} <span class="text-xs font-bold text-indigo-200">نقطة</span>`;
 
-                const progressPercent = total === 0 ? 0 : Math.round((completed / total) * 100);
-                document.getElementById('navProgressText').textContent = `${progressPercent}%`;
-                document.getElementById('navProgressBar').style.width = `${progressPercent}%`;
                 document.getElementById('pendingBadge').textContent = active;
             },
 
@@ -771,8 +753,7 @@
 
                 if(st.gameProgress) {
                     Object.entries(st.gameProgress).forEach(([gKey, gLvl]) => {
-                        const gameMeta = availableGamesDB[gKey];
-                        if(!gameMeta) return;
+                        const gameMeta = availableGamesDB[gKey] || { title: gKey, icon: 'fa-gamepad', color: 'indigo' };
                         totalGames++;
                         
                         // محاكاة زمن الاستجابة الفعلي لغرض التقرير الإكلينيكي (بناءً على المستوى)
@@ -811,12 +792,33 @@
             // ==========================================
             loadCMSUnits: async function() {
                 try {
+                    // جلب مكتبة الألعاب ديناميكياً من السحابة (games_library)
+                    const gamesSnap = await getDocs(collection(db, "games_library"));
+                    availableGamesDB = {};
+                    gamesSnap.forEach(d => {
+                        const data = d.data();
+                        const key = data.key || d.id;
+                        availableGamesDB[key] = {
+                            title: data.title || key,
+                            icon: data.icon || 'fa-gamepad',
+                            color: data.color || 'indigo'
+                        };
+                    });
+
+                    // افتراضي في حال كانت السحابة فارغة
+                    if(Object.keys(availableGamesDB).length === 0) {
+                        availableGamesDB = {
+                            'reaction_lvl_1': { title: 'صائد النجوم - مستوى 1', icon: 'fa-meteor', color: 'amber' },
+                            'video_interactive_1': { title: 'فيديو الكيمياء التفاعلي', icon: 'fa-file-video', color: 'blue' }
+                        };
+                    }
+
                     const snap = await getDocs(collection(db, "units"));
                     if(snap.empty) {
                         for(let i=1; i<=3; i++) {
                             await setDoc(doc(db, "units", i.toString()), {
                                 id: i, title: `الوحدة ${i}`, desc: 'تحديات مخصصة.', difficulty: 1.0, status: 'active',
-                                games: [{key: 'reaction', timeLimit: 15, speed: 1.0}]
+                                games: [{key: 'reaction_lvl_1', timeLimit: 15, speed: 1.0}]
                             });
                         }
                         this.loadCMSUnits();
@@ -883,8 +885,7 @@
                 }
 
                 this.currentCMSUnit.games.forEach((gameObj, index) => {
-                    const gData = availableGamesDB[gameObj.key];
-                    if(!gData) return;
+                    const gData = availableGamesDB[gameObj.key] || { title: gameObj.key, icon: 'fa-gamepad', color: 'indigo' };
                     list.innerHTML += `
                         <div class="flex items-center justify-between p-3 border border-slate-200 rounded-xl bg-white shadow-sm transition animate-fadeIn hover:border-indigo-300 group">
                             <div class="flex items-center gap-3">
@@ -906,7 +907,6 @@
                 });
             },
 
-            // إنشاء مستوى جديد تماماً (Add Unit)
             createNewUnit: async function() {
                 const newId = this.cmsUnits.length > 0 ? Math.max(...this.cmsUnits.map(u => u.id)) + 1 : 1;
                 const newUnitObj = {
@@ -926,7 +926,6 @@
                 } catch(e) { console.error(e); alert("فشل إنشاء الوحدة."); }
             },
 
-            // حذف المستوى (Delete Unit)
             deleteCMSUnit: async function(e) {
                 if(!this.currentCMSUnit) return;
                 if(confirm(`هل أنت متأكد من حذف ${this.currentCMSUnit.title} نهائياً؟ هذا سيؤثر على تقدم الطلاب.`)) {
@@ -957,11 +956,10 @@
                 this.renderCMSGames();
             },
 
-            // إعدادات وصيانة الألعاب (تحديد الوقت والسرعة والفيديو)
             editGameSettings: function(index) {
                 this.editingGameIndex = index;
                 const gameObj = this.currentCMSUnit.games[index];
-                const meta = availableGamesDB[gameObj.key];
+                const meta = availableGamesDB[gameObj.key] || { title: gameObj.key };
                 
                 document.getElementById('mgs-game-name').textContent = meta.title;
                 document.getElementById('mgs-time').value = gameObj.timeLimit || 15;
@@ -991,10 +989,9 @@
                 this.currentCMSUnit.games[this.editingGameIndex].mediaUrl = mediaUrl;
                 
                 this.closeGameSettings();
-                this.renderCMSGames(); // Refresh list to show updated params
+                this.renderCMSGames();
             },
 
-            // حفظ كل تعديلات الوحدة للسحابة لينعكس على الطلاب
             saveCMSUnit: async function(e) {
                 if(!this.currentCMSUnit) return;
                 const btn = e.currentTarget;
@@ -1031,9 +1028,6 @@
                 }
             },
 
-            // ==========================================
-            // UI Utilities
-            // ==========================================
             toggleSidebar: function() { document.getElementById('sidebar').classList.toggle('translate-x-full'); },
 
             switchTab: function(tabId) {
